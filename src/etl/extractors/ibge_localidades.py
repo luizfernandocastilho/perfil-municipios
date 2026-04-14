@@ -71,6 +71,9 @@ def _extract_fields(item: dict) -> dict:
     codigo_ibge = str(item["id"]).zfill(7)
     nome = item["nome"].strip()
 
+    # Fallback: deduzir codigo_uf dos 2 primeiros dígitos do código IBGE
+    uf_fallback = int(codigo_ibge[:2])
+
     # Detectar formato: se "microrregiao" é dict, é aninhado
     micro = item.get("microrregiao")
 
@@ -85,7 +88,7 @@ def _extract_fields(item: dict) -> dict:
             "codigo_ibge": codigo_ibge,
             "nome": nome,
             "nome_normalizado": unidecode(nome).lower().strip(),
-            "codigo_uf": uf_obj.get("id"),
+            "codigo_uf": uf_obj.get("id") or uf_fallback,
             "codigo_mesorregiao": meso.get("id"),
             "nome_mesorregiao": meso.get("nome"),
             "codigo_microrregiao": micro.get("id"),
@@ -102,7 +105,7 @@ def _extract_fields(item: dict) -> dict:
             "codigo_ibge": codigo_ibge,
             "nome": nome,
             "nome_normalizado": unidecode(nome).lower().strip(),
-            "codigo_uf": item.get("UF-id"),
+            "codigo_uf": item.get("UF-id") or uf_fallback,
             "codigo_mesorregiao": item.get("mesorregiao-id"),
             "nome_mesorregiao": item.get("mesorregiao-nome"),
             "codigo_microrregiao": item.get("microrregiao-id"),
