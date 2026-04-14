@@ -72,7 +72,7 @@ perfil-municipios/
 
 ```bash
 # 1. Clonar o repositório
-git clone https://github.com/SEU_USUARIO/perfil-municipios.git
+git clone https://github.com/luizfernandocastilho/perfil-municipios.git
 cd perfil-municipios
 
 # 2. Criar e ativar ambiente virtual
