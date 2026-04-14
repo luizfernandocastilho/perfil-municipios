@@ -1,0 +1,89 @@
+# ─── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.venv/
+venv/
+ENV/
+
+# ─── IDE ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── Ambiente ─────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+!.env.example
+
+# ─── Dados locais (NUNCA commitar dados brutos) ──────────────────────────
+data/raw/
+data/processed/
+data/cache/
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.zip
+*.gz
+*.tar
+*.7z
+*.parquet
+*.feather
+*.db
+*.sqlite
+!db/seeds/*.csv
+!dbt/seeds/*.csv
+
+# ─── Jupyter notebooks outputs ───────────────────────────────────────────
+notebooks/.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ─── Testes e cobertura ──────────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─── Node.js (frontend) ─────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+
+# ─── Docker ──────────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ─── dbt ─────────────────────────────────────────────────────────────────
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# ─── Airflow ─────────────────────────────────────────────────────────────
+airflow/logs/
+airflow/airflow.db
+
+# ─── Geoespacial ─────────────────────────────────────────────────────────
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.geojson
+!db/seeds/*.geojson

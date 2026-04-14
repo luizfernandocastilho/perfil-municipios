@@ -1,0 +1,655 @@
+# ============================================================================
+# PERFIL MUNICÍPIOS BRASILEIROS — dbt Schema (v1.0.0)
+# Arquivo: models/schema.yml
+# ============================================================================
+
+version: 2
+
+sources:
+  - name: raw
+    description: "Dados brutos carregados pelos pipelines ETL"
+    schema: raw
+    tables:
+      - name: ibge_localidades
+        description: "Localidades do IBGE (municípios, UFs, regiões)"
+      - name: ibge_censo
+        description: "Dados do Censo 2022"
+      - name: ibge_pib_municipal
+        description: "PIB dos municípios"
+      - name: tse_candidaturas
+        description: "Candidaturas do TSE"
+      - name: tse_votacao
+        description: "Resultados de votação do TSE"
+      - name: cgu_emendas
+        description: "Emendas parlamentares do Portal da Transparência"
+      - name: obras_gov_pac
+        description: "Obras do PAC via Obras.gov.br"
+      - name: siconfi_financas
+        description: "Finanças municipais do SICONFI/Finbra"
+      - name: datasus_saude
+        description: "Indicadores de saúde do DATASUS"
+      - name: inep_educacao
+        description: "Censo Escolar e IDEB do INEP"
+      - name: caged_emprego
+        description: "Dados de emprego formal do Novo CAGED"
+      - name: rais_emprego
+        description: "Estoque de emprego da RAIS"
+      - name: snis_saneamento
+        description: "Indicadores de saneamento do SNIS"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# DIMENSÕES
+# ────────────────────────────────────────────────────────────────────────────
+
+models:
+
+  # ── dim_regiao ──
+  - name: dim_regiao
+    description: "Regiões geográficas do Brasil (Norte, Nordeste, Sudeste, Sul, Centro-Oeste)"
+    columns:
+      - name: codigo_regiao
+        description: "Código IBGE da região"
+        data_tests:
+          - unique
+          - not_null
+      - name: nome
+        description: "Nome da região"
+        data_tests:
+          - not_null
+
+  # ── dim_uf ──
+  - name: dim_uf
+    description: "Unidades Federativas (estados + DF)"
+    columns:
+      - name: codigo_uf
+        description: "Código IBGE da UF (2 dígitos)"
+        data_tests:
+          - unique
+          - not_null
+      - name: sigla
+        description: "Sigla da UF (ex: MG, SP, RJ)"
+        data_tests:
+          - unique
+          - not_null
+      - name: nome
+        description: "Nome completo da UF"
+        data_tests:
+          - not_null
+      - name: codigo_regiao
+        description: "FK para dim_regiao"
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_regiao')
+              field: codigo_regiao
+
+  # ── dim_municipio ──
+  - name: dim_municipio
+    description: >
+      Tabela central do sistema: todos os 5.570 municípios brasileiros
+      com hierarquia territorial completa e geometria para mapas.
+      Fonte primária: IBGE API de Localidades + Malhas Territoriais.
+    columns:
+      - name: codigo_ibge
+        description: "Código IBGE do município (7 dígitos: 2 UF + 5 município)"
+        data_tests:
+          - unique
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: "'1100015'"
+              max_value: "'5300108'"
+      - name: nome
+        description: "Nome oficial do município"
+        data_tests:
+          - not_null
+      - name: nome_normalizado
+        description: "Nome sem acentos e em minúsculas (para buscas)"
+        data_tests:
+          - not_null
+      - name: codigo_uf
+        description: "FK para dim_uf"
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_uf')
+              field: codigo_uf
+      - name: area_km2
+        description: "Área territorial em km²"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 200000
+      - name: capital
+        description: "Se é capital estadual"
+
+  # ── dim_partido ──
+  - name: dim_partido
+    description: >
+      Partidos políticos brasileiros com controle de vigência temporal
+      (partidos podem mudar de nome/sigla ou ser incorporados).
+      Fonte: TSE.
+    columns:
+      - name: id_partido
+        description: "ID interno (surrogate key)"
+        data_tests:
+          - unique
+          - not_null
+      - name: sigla
+        description: "Sigla do partido (ex: PT, PL, MDB)"
+        data_tests:
+          - not_null
+      - name: nome
+        description: "Nome completo do partido"
+        data_tests:
+          - not_null
+      - name: numero
+        description: "Número eleitoral do partido"
+        data_tests:
+          - not_null
+      - name: situacao
+        description: "Situação atual: Ativo, Extinto, Incorporado"
+        data_tests:
+          - accepted_values:
+              values: ['Ativo', 'Extinto', 'Incorporado']
+
+  # ── dim_parlamentar ──
+  - name: dim_parlamentar
+    description: >
+      Parlamentares e candidatos unificados por cpf_hash.
+      Inclui prefeitos, vereadores, deputados, senadores e governadores.
+      Fontes: TSE, Câmara dos Deputados, Senado.
+    columns:
+      - name: id_parlamentar
+        description: "ID interno (surrogate key)"
+        data_tests:
+          - unique
+          - not_null
+      - name: nome_completo
+        description: "Nome civil completo"
+        data_tests:
+          - not_null
+      - name: cpf_hash
+        description: "SHA-256 do CPF para deduplicação cross-source (sem armazenar CPF)"
+      - name: genero
+        description: "Gênero declarado"
+        data_tests:
+          - accepted_values:
+              values: ['Masculino', 'Feminino', 'Não Informado']
+              config:
+                severity: warn
+
+  # ── dim_cargo ──
+  - name: dim_cargo
+    description: "Cargos eletivos (prefeito, vereador, deputado, senador, governador, presidente)"
+    columns:
+      - name: id_cargo
+        data_tests:
+          - unique
+          - not_null
+      - name: nome
+        description: "Nome do cargo"
+        data_tests:
+          - not_null
+      - name: esfera
+        description: "Esfera: Municipal, Estadual, Federal"
+        data_tests:
+          - accepted_values:
+              values: ['Municipal', 'Estadual', 'Federal']
+      - name: abrangencia
+        description: "Abrangência: Município, Estado, Nacional"
+        data_tests:
+          - accepted_values:
+              values: ['Município', 'Estado', 'Nacional']
+
+  # ── dim_eleicao ──
+  - name: dim_eleicao
+    description: "Eleições realizadas (ano + tipo)"
+    columns:
+      - name: id_eleicao
+        data_tests:
+          - unique
+          - not_null
+      - name: ano
+        description: "Ano da eleição"
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1998
+              max_value: 2030
+      - name: tipo
+        description: "Tipo: Ordinária ou Suplementar"
+        data_tests:
+          - not_null
+
+  # ── dim_funcao_orcamentaria ──
+  - name: dim_funcao_orcamentaria
+    description: "Funções e subfunções orçamentárias (classificação funcional da despesa)"
+    columns:
+      - name: codigo_funcao
+        data_tests:
+          - unique
+          - not_null
+      - name: nome_funcao
+        data_tests:
+          - not_null
+
+  # ── dim_fonte ──
+  - name: dim_fonte
+    description: "Registro de cada fonte de dados (para rastreabilidade/linhagem)"
+    columns:
+      - name: id_fonte
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo
+        description: "Código curto (G01, E01, P01...) — corresponde ao Catálogo de Fontes"
+        data_tests:
+          - unique
+          - not_null
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# FATOS
+# ────────────────────────────────────────────────────────────────────────────
+
+  # ── fato_candidatura ──
+  - name: fato_candidatura
+    description: >
+      Cada registro = uma candidatura (pessoa + cargo + eleição + município).
+      Fonte: TSE Repositório de Dados Eleitorais.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: id_eleicao
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_eleicao')
+              field: id_eleicao
+      - name: id_parlamentar
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_parlamentar')
+              field: id_parlamentar
+      - name: id_cargo
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_cargo')
+              field: id_cargo
+      - name: codigo_ibge
+        description: "Município da candidatura (NULL para cargos estaduais/federais)"
+        data_tests:
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+              config:
+                where: "codigo_ibge IS NOT NULL"
+      - name: situacao_turno
+        description: "Resultado: Eleito, Não Eleito, 2º Turno, Suplente"
+
+  # ── fato_votacao ──
+  - name: fato_votacao
+    description: >
+      Votos por candidato por município (e opcionalmente por zona eleitoral).
+      Granularidade: 1 linha = 1 candidato × 1 município × 1 turno.
+      Fonte: TSE.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+      - name: votos
+        description: "Total de votos recebidos"
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: percentual_votos
+        description: "% sobre votos válidos naquele município"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              config:
+                where: "percentual_votos IS NOT NULL"
+
+  # ── fato_emenda ──
+  - name: fato_emenda
+    description: >
+      Emendas parlamentares destinadas a municípios.
+      Inclui individual, bancada, comissão, relator e Pix.
+      Fontes: CGU Portal da Transparência, SOF/SIOP, Siga Brasil.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: ano_loa
+        description: "Ano da Lei Orçamentária Anual"
+        data_tests:
+          - not_null
+      - name: tipo_emenda
+        description: "Tipo da emenda"
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Individual', 'Bancada', 'Comissão', 'Relator', 'Pix', 'Transferência Especial']
+              config:
+                severity: warn
+      - name: valor_empenhado
+        description: "Valor empenhado em R$"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              config:
+                where: "valor_empenhado IS NOT NULL"
+      - name: valor_pago
+        description: "Valor efetivamente pago em R$"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              config:
+                where: "valor_pago IS NOT NULL"
+
+  # ── fato_obra_pac ──
+  - name: fato_obra_pac
+    description: >
+      Obras do PAC por município: valor, status, execução física/financeira.
+      Fonte: Obras.gov.br.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+      - name: status
+        description: "Status da obra"
+        data_tests:
+          - accepted_values:
+              values: ['Em licitação', 'Em execução', 'Concluída', 'Paralisada', 'Não iniciada', 'Cancelada']
+              config:
+                severity: warn
+      - name: pct_execucao_fisica
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+              config:
+                where: "pct_execucao_fisica IS NOT NULL"
+
+  # ── fato_financas ──
+  - name: fato_financas
+    description: >
+      Finanças municipais anuais: receitas, despesas, indicadores fiscais.
+      Uma linha por município por ano. Fonte: SICONFI/Finbra (Tesouro Nacional).
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+      - name: ano
+        data_tests:
+          - not_null
+      - name: capag
+        description: "Nota CAPAG: capacidade de pagamento do município"
+        data_tests:
+          - accepted_values:
+              values: ['A', 'B', 'C', 'D']
+              config:
+                where: "capag IS NOT NULL"
+                severity: warn
+      - name: pct_pessoal_rcl
+        description: "% despesa com pessoal sobre receita corrente líquida (limite LRF: 54%)"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+              config:
+                where: "pct_pessoal_rcl IS NOT NULL"
+                severity: warn
+
+  # ── fato_demografia ──
+  - name: fato_demografia
+    description: >
+      Indicadores demográficos e socioeconômicos por município.
+      Fontes: IBGE Censo, IBGE Estimativas, PNAD, Atlas do Desenvolvimento Humano.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+      - name: ano_referencia
+        data_tests:
+          - not_null
+      - name: idhm
+        description: "IDHM (0 a 1)"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              config:
+                where: "idhm IS NOT NULL"
+      - name: gini
+        description: "Índice de Gini (0 = igualdade perfeita, 1 = desigualdade máxima)"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              config:
+                where: "gini IS NOT NULL"
+
+  # ── fato_transferencia ──
+  - name: fato_transferencia
+    description: >
+      Transferências da União para municípios (FPM, FUNDEB, CFEM, SUS, FNDE...).
+      Fonte: Tesouro Nacional, FNS, FNDE.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+      - name: tipo_transferencia
+        data_tests:
+          - not_null
+      - name: valor
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  # ── fato_saude ──
+  - name: fato_saude
+    description: >
+      Indicadores de saúde por município: cobertura ESF, leitos, repasses FNS.
+      Fontes: DATASUS (TabNet, CNES), e-Gestor AB, FNS.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+
+  # ── fato_educacao ──
+  - name: fato_educacao
+    description: >
+      Indicadores educacionais por município: escolas, matrículas, IDEB, repasses FNDE.
+      Fontes: INEP (Censo Escolar, IDEB), FNDE.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+      - name: ideb_anos_iniciais
+        description: "IDEB dos anos iniciais do ensino fundamental"
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 10
+              config:
+                where: "ideb_anos_iniciais IS NOT NULL"
+
+  # ── fato_emprego ──
+  - name: fato_emprego
+    description: >
+      Emprego formal e programas sociais por município.
+      Fontes: CAGED (mensal), RAIS (anual), CadÚnico/MDS.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+
+  # ── fato_infraestrutura ──
+  - name: fato_infraestrutura
+    description: >
+      Indicadores de infraestrutura: saneamento, energia, telecomunicações.
+      Fontes: SNIS, ANEEL, ANATEL.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+
+  # ── fato_seguranca ──
+  - name: fato_seguranca
+    description: >
+      Indicadores de segurança pública: ocorrências criminais e taxas.
+      Fonte: SINESP/MJSP.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+
+  # ── fato_meio_ambiente ──
+  - name: fato_meio_ambiente
+    description: >
+      Indicadores ambientais: desmatamento, áreas protegidas, focos de incêndio.
+      Fontes: INPE (PRODES, TerraBrasilis), ICMBio.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+
+  # ── fato_gestao_municipal ──
+  - name: fato_gestao_municipal
+    description: >
+      Gestão e estrutura administrativa do município: prefeito, conselhos, servidores.
+      Fontes: TSE (prefeito eleito), IBGE MUNIC.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: codigo_ibge
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_municipio')
+              field: codigo_ibge
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# TABELAS AUXILIARES
+# ────────────────────────────────────────────────────────────────────────────
+
+  # ── hist_mandato ──
+  - name: hist_mandato
+    description: "Histórico de mandatos: vínculo parlamentar-cargo-período-localidade"
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: id_parlamentar
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_parlamentar')
+              field: id_parlamentar
+      - name: id_cargo
+        data_tests:
+          - not_null
+      - name: situacao
+        data_tests:
+          - accepted_values:
+              values: ['Exercício', 'Licenciado', 'Cassado', 'Renunciou', 'Falecido', 'Suplente']
+
+  # ── controle_carga ──
+  - name: controle_carga
+    description: >
+      Log de execução dos pipelines ETL. Cada registro = uma execução de carga
+      com contagem de registros, erros e duração. Essencial para monitoramento.
+    columns:
+      - name: id
+        data_tests:
+          - unique
+          - not_null
+      - name: id_fonte
+        data_tests:
+          - not_null
+      - name: status
+        data_tests:
+          - accepted_values:
+              values: ['Sucesso', 'Falha', 'Parcial']
